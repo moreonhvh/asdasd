@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -13,7 +14,13 @@ INVITE_CODES = set(
 )
 
 REGISTER_SECRET = os.environ.get('REGISTER_SECRET', '')
-colab_urls = []
+MIRROR_TTL = 14 * 3600  # 14 часов в секундах
+colab_urls = []  # [{'url': '...', 'expires': timestamp}]
+
+
+def active_mirrors():
+    now = time.time()
+    return [m for m in colab_urls if m['expires'] > now]
 
 HTML = '''<!DOCTYPE html>
 <html lang="ru">
@@ -117,7 +124,7 @@ HTML = '''<!DOCTYPE html>
         const data = await res.json();
         if (data.status === 'ok') {
           document.getElementById('email').value = data.email;
-          tmpToken = data.token;
+          tmpToken = data.mailbox_id || data.token;
           btn.textContent = '🔄 Новый';
         } else {
           btn.textContent = '❌ ' + (data.message || '');
@@ -137,7 +144,7 @@ HTML = '''<!DOCTYPE html>
         const res = await fetch('/tempmail/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: tmpToken })
+          body: JSON.stringify({ mailbox_id: tmpToken })
         });
         const data = await res.json();
         if (data.status === 'empty') {
@@ -210,6 +217,26 @@ def ping():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/status')
+def status():
+    mirrors = active_mirrors()
+    now = time.time()
+    return jsonify({
+        'mirrors': len(mirrors),
+        'list': [{'url': m['url'], 'expires_in_min': int((m['expires'] - now) / 60)} for m in mirrors]
+    })
+
+
+@app.route('/clear', methods=['POST'])
+def clear():
+    global colab_urls
+    data = request.get_json()
+    if data.get('secret', '') != REGISTER_SECRET:
+        return jsonify({'status': 'error'}), 401
+    colab_urls = []
+    return jsonify({'status': 'ok', 'message': 'Список зеркал очищен'})
+
+
 @app.route('/register', methods=['POST'])
 def register():
     global colab_urls
@@ -217,9 +244,11 @@ def register():
     if data.get('secret', '') != REGISTER_SECRET:
         return jsonify({'status': 'error'}), 401
     url = data.get('url', '').strip()
-    if url and url not in colab_urls:
-        colab_urls.append(url)
-    return jsonify({'status': 'ok', 'mirrors': len(colab_urls)})
+    if url:
+        colab_urls = [m for m in colab_urls if m['url'] != url]  # убираем дубли
+        colab_urls.append({'url': url, 'expires': time.time() + MIRROR_TTL})
+    mirrors = active_mirrors()
+    return jsonify({'status': 'ok', 'mirrors': len(mirrors)})
 
 
 @app.route('/demo', methods=['POST'])
@@ -240,30 +269,27 @@ def demo():
         return jsonify({'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'})
 
     PAGE_UNAVAILABLE = 'Страница демо недоступна. Попробуй позже.'
+    mirrors = active_mirrors()
 
-    # Перемешиваем зеркала и пробуем по одному
-    for url in random.sample(colab_urls, len(colab_urls)):
+    for m in random.sample(mirrors, len(mirrors)):
+        url = m['url']
         try:
             r = requests.post(f'{url}/demo', json={'email': email}, timeout=20)
             result = r.json()
-            # IP заблокирован — пробуем следующее зеркало
             if result.get('message') == PAGE_UNAVAILABLE:
                 continue
-            # Любой другой результат (успех или "email не подходит") — возвращаем сразу
             return jsonify(result)
         except requests.RequestException:
-            # Зеркало недоступно — убираем из списка и идём дальше
-            if url in colab_urls:
-                colab_urls.remove(url)
+            colab_urls[:] = [x for x in colab_urls if x['url'] != url]
             continue
 
-    # Все зеркала попробованы — все заблокированы
     return jsonify({'status': 'error', 'message': PAGE_UNAVAILABLE})
 
 
 def _pick_mirror():
     import random
-    return random.choice(colab_urls) if colab_urls else None
+    mirrors = active_mirrors()
+    return random.choice(mirrors)['url'] if mirrors else None
 
 
 @app.route('/tempmail/create')
