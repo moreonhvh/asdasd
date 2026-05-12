@@ -13,7 +13,7 @@ INVITE_CODES = set(
 )
 
 REGISTER_SECRET = os.environ.get('REGISTER_SECRET', '')
-colab_url = None
+colab_urls = []
 
 HTML = '''<!DOCTYPE html>
 <html lang="ru">
@@ -149,17 +149,20 @@ def ping():
 
 @app.route('/register', methods=['POST'])
 def register():
-    global colab_url
+    global colab_urls
     data = request.get_json()
     if data.get('secret', '') != REGISTER_SECRET:
         return jsonify({'status': 'error'}), 401
-    colab_url = data.get('url', '').strip()
-    return jsonify({'status': 'ok'})
+    url = data.get('url', '').strip()
+    if url and url not in colab_urls:
+        colab_urls.append(url)
+    return jsonify({'status': 'ok', 'mirrors': len(colab_urls)})
 
 
 @app.route('/demo', methods=['POST'])
 def demo():
-    global colab_url
+    global colab_urls
+    import random
     data = request.get_json()
     code = (data.get('code') or '').strip().upper()
     email = (data.get('email') or '').strip()
@@ -170,14 +173,15 @@ def demo():
     if not email:
         return jsonify({'status': 'error', 'message': 'Email не указан'})
 
-    if not colab_url:
+    if not colab_urls:
         return jsonify({'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'})
 
+    url = random.choice(colab_urls)
     try:
-        r = requests.post(f'{colab_url}/demo', json={'email': email}, timeout=20)
+        r = requests.post(f'{url}/demo', json={'email': email}, timeout=20)
         return jsonify(r.json())
     except requests.RequestException:
-        colab_url = None
+        colab_urls.remove(url)
         return jsonify({'status': 'error', 'message': 'Ошибка соединения. Попробуй ещё раз.'})
 
 
