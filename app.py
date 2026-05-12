@@ -12,8 +12,8 @@ INVITE_CODES = set(
     if c.strip()
 )
 
-DEMO_URL = 'https://hdmn.cloud/ru/demo/'
-DEMO_SUCCESS_URL = 'https://hdmn.cloud/ru/demo/success/'
+REGISTER_SECRET = os.environ.get('REGISTER_SECRET', '')
+colab_url = None
 
 HTML = '''<!DOCTYPE html>
 <html lang="ru">
@@ -147,8 +147,19 @@ def ping():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/register', methods=['POST'])
+def register():
+    global colab_url
+    data = request.get_json()
+    if data.get('secret', '') != REGISTER_SECRET:
+        return jsonify({'status': 'error'}), 401
+    colab_url = data.get('url', '').strip()
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/demo', methods=['POST'])
 def demo():
+    global colab_url
     data = request.get_json()
     code = (data.get('code') or '').strip().upper()
     email = (data.get('email') or '').strip()
@@ -159,18 +170,14 @@ def demo():
     if not email:
         return jsonify({'status': 'error', 'message': 'Email не указан'})
 
+    if not colab_url:
+        return jsonify({'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'})
+
     try:
-        r = requests.get(DEMO_URL, timeout=10)
-        if 'Ваша электронная почта' not in r.text:
-            return jsonify({'status': 'error', 'message': 'Страница демо недоступна. Попробуй позже.'})
-
-        r = requests.post(DEMO_SUCCESS_URL, data={'demo_mail': email}, timeout=10)
-        if 'Ваш код выслан на почту' in r.text:
-            return jsonify({'status': 'success', 'message': 'Код выслан на почту! Проверь входящие.'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Email не подходит для тестового периода.'})
-
+        r = requests.post(f'{colab_url}/demo', json={'email': email}, timeout=20)
+        return jsonify(r.json())
     except requests.RequestException:
+        colab_url = None
         return jsonify({'status': 'error', 'message': 'Ошибка соединения. Попробуй ещё раз.'})
 
 
