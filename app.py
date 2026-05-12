@@ -298,7 +298,7 @@ def tempmail_create():
     if not url:
         return jsonify({'status': 'error', 'message': 'Сервис недоступен'})
     try:
-        r = requests.get(f'{url}/tempmail/create', timeout=15)
+        r = requests.get(f'{url}/tempmail/create', timeout=120)
         return jsonify(r.json())
     except requests.RequestException:
         return jsonify({'status': 'error', 'message': 'Ошибка соединения'})
@@ -310,7 +310,7 @@ def tempmail_check():
     if not url:
         return jsonify({'status': 'error', 'message': 'Сервис недоступен'})
     try:
-        r = requests.post(f'{url}/tempmail/check', json=request.get_json(), timeout=15)
+        r = requests.post(f'{url}/tempmail/check', json=request.get_json(), timeout=30)
         return jsonify(r.json())
     except requests.RequestException:
         return jsonify({'status': 'error', 'message': 'Ошибка соединения'})
