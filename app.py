@@ -101,7 +101,7 @@ HTML = '''<!DOCTYPE html>
     <div class="mail-body" id="mailBody"></div>
   </div>
   <script>
-    let tmpLogin = '', tmpDomain = '';
+    let tmpToken = '';
 
     window.onload = () => {
       const saved = localStorage.getItem('invite_code');
@@ -117,11 +117,10 @@ HTML = '''<!DOCTYPE html>
         const data = await res.json();
         if (data.status === 'ok') {
           document.getElementById('email').value = data.email;
-          tmpLogin = data.login;
-          tmpDomain = data.domain;
+          tmpToken = data.token;
           btn.textContent = '🔄 Новый';
         } else {
-          btn.textContent = '❌';
+          btn.textContent = '❌ ' + (data.message || '');
         }
       } catch {
         btn.textContent = '❌';
@@ -138,7 +137,7 @@ HTML = '''<!DOCTYPE html>
         const res = await fetch('/tempmail/check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ login: tmpLogin, domain: tmpDomain })
+          body: JSON.stringify({ token: tmpToken })
         });
         const data = await res.json();
         if (data.status === 'empty') {
