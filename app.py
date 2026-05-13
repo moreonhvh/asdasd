@@ -17,7 +17,6 @@ REGISTER_SECRET = os.environ.get('REGISTER_SECRET', '')
 MIRROR_TTL = 14 * 3600  # 14 часов в секундах
 colab_urls = []  # [{'url': '...', 'expires': timestamp}]
 
-CF_WORKER_URL = os.environ.get('CF_WORKER_URL', '')
 
 
 def active_mirrors():
@@ -239,6 +238,17 @@ def clear():
     return jsonify({'status': 'ok', 'message': 'Список зеркал очищен'})
 
 
+@app.route('/deregister', methods=['POST'])
+def deregister():
+    global colab_urls
+    data = request.get_json()
+    if data.get('secret', '') != REGISTER_SECRET:
+        return jsonify({'status': 'error'}), 401
+    url = data.get('url', '').strip()
+    colab_urls = [m for m in colab_urls if m['url'] != url]
+    return jsonify({'status': 'ok', 'mirrors': len(active_mirrors())})
+
+
 @app.route('/register', methods=['POST'])
 def register():
     global colab_urls
@@ -268,18 +278,6 @@ def demo():
         return jsonify({'status': 'error', 'message': 'Email не указан'})
 
     PAGE_UNAVAILABLE = 'Страница демо недоступна. Попробуй позже.'
-
-    # 1. Cloudflare Worker
-    if CF_WORKER_URL:
-        try:
-            r = requests.post(CF_WORKER_URL, json={'email': email, 'secret': REGISTER_SECRET}, timeout=20)
-            result = r.json()
-            if result.get('message') != PAGE_UNAVAILABLE:
-                return jsonify(result)
-        except requests.RequestException:
-            pass
-
-    # 2. Google Colab зеркала
     mirrors = active_mirrors()
     if not mirrors:
         return jsonify({'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'})
