@@ -80,6 +80,16 @@ HTML = '''<!DOCTYPE html>
       border-radius: 10px; font-size: 14px; color: #334155;
       border: 1.5px solid #e2e8f0; display: none; white-space: pre-wrap; word-break: break-word;
     }
+    .mirrors-badge {
+      text-align: center; font-size: 12px; color: #888;
+      margin-bottom: 20px;
+    }
+    .mirrors-badge span {
+      display: inline-block; padding: 3px 10px;
+      border-radius: 20px; font-weight: 600;
+    }
+    .mirrors-ok { background: #f0fdf4; color: #166534; }
+    .mirrors-none { background: #fef2f2; color: #991b1b; }
     .spinner {
       display: inline-block; width: 18px; height: 18px;
       border: 2px solid rgba(255,255,255,0.4); border-top-color: white;
@@ -92,6 +102,9 @@ HTML = '''<!DOCTYPE html>
 <body>
   <div class="card">
     <h1>HDMN — Тестовый доступ</h1>
+    <div class="mirrors-badge">
+      <span id="mirrorsLabel">⏳ проверяем...</span>
+    </div>
     <div class="field">
       <label>Инвайт-код</label>
       <input type="text" id="code" placeholder="HDMN-XXXX" autocomplete="off" autocapitalize="characters">
@@ -111,9 +124,26 @@ HTML = '''<!DOCTYPE html>
   <script>
     let tmpToken = '';
 
+    async function updateMirrors() {
+      try {
+        const r = await fetch('/status');
+        const d = await r.json();
+        const el = document.getElementById('mirrorsLabel');
+        if (d.mirrors > 0) {
+          el.textContent = `🟢 Зеркал активно: ${d.mirrors}`;
+          el.className = 'mirrors-ok';
+        } else {
+          el.textContent = '🔴 Нет активных зеркал';
+          el.className = 'mirrors-none';
+        }
+      } catch { }
+    }
+
     window.onload = () => {
       const saved = localStorage.getItem('invite_code');
       if (saved) document.getElementById('code').value = saved;
+      updateMirrors();
+      setInterval(updateMirrors, 30000);
     };
 
     async function getTempMail() {
