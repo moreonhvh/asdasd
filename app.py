@@ -315,7 +315,7 @@ def demo():
     for m in random.sample(mirrors, len(mirrors)):
         url = m['url']
         try:
-            r = requests.post(f'{url}/demo', json={'email': email}, timeout=20)
+            r = requests.post(f'{url}/demo', json={'email': email}, timeout=60)
             result = r.json()
             if result.get('message') == PAGE_UNAVAILABLE:
                 continue
