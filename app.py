@@ -1,5 +1,7 @@
 import os
 import time
+import uuid
+import threading
 import requests
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -14,8 +16,9 @@ INVITE_CODES = set(
 )
 
 REGISTER_SECRET = os.environ.get('REGISTER_SECRET', '')
-MIRROR_TTL = 14 * 3600  # 14 часов в секундах
-colab_urls = []  # [{'url': '...', 'expires': timestamp}]
+MIRROR_TTL = 14 * 3600
+colab_urls = []
+tasks = {}  # {task_id: {'status': 'pending'|'done', 'result': {...}}}
 
 
 
@@ -212,9 +215,11 @@ HTML = '''<!DOCTYPE html>
           body: JSON.stringify({ code, email })
         });
         const data = await res.json();
-        show(data.message, data.status === 'success');
-        if (data.status === 'success' && tmpLogin) {
-          document.getElementById('checkBtn').style.display = 'block';
+
+        if (data.status === 'pending') {
+          await pollResult(data.task_id);
+        } else {
+          show(data.message, data.status === 'success');
         }
       } catch {
         show('Ошибка соединения. Попробуй ещё раз.', false);
@@ -222,6 +227,24 @@ HTML = '''<!DOCTYPE html>
         btn.disabled = false;
         btn.innerHTML = 'Получить тестовый период';
       }
+    }
+
+    async function pollResult(taskId) {
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const res = await fetch(`/poll/${taskId}`);
+          const data = await res.json();
+          if (data.status !== 'pending') {
+            show(data.message, data.status === 'success');
+            if (data.status === 'success' && tmpToken) {
+              document.getElementById('checkBtn').style.display = 'block';
+            }
+            return;
+          }
+        } catch {}
+      }
+      show('Превышено время ожидания. Попробуй ещё раз.', false);
     }
 
     function show(msg, ok) {
@@ -293,10 +316,32 @@ def register():
     return jsonify({'status': 'ok', 'mirrors': len(mirrors)})
 
 
+def _run_demo(task_id, email):
+    import random
+    PAGE_UNAVAILABLE = 'Страница демо недоступна. Попробуй позже.'
+    mirrors = active_mirrors()
+    if not mirrors:
+        tasks[task_id] = {'status': 'done', 'result': {'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'}}
+        return
+
+    for m in random.sample(mirrors, len(mirrors)):
+        url = m['url']
+        try:
+            r = requests.post(f'{url}/demo', json={'email': email}, timeout=60)
+            result = r.json()
+            if result.get('message') == PAGE_UNAVAILABLE:
+                continue
+            tasks[task_id] = {'status': 'done', 'result': result}
+            return
+        except requests.RequestException:
+            colab_urls[:] = [x for x in colab_urls if x['url'] != url]
+            continue
+
+    tasks[task_id] = {'status': 'done', 'result': {'status': 'error', 'message': PAGE_UNAVAILABLE}}
+
+
 @app.route('/demo', methods=['POST'])
 def demo():
-    global colab_urls
-    import random
     data = request.get_json()
     code = (data.get('code') or '').strip().upper()
     email = (data.get('email') or '').strip()
@@ -307,24 +352,21 @@ def demo():
     if not email:
         return jsonify({'status': 'error', 'message': 'Email не указан'})
 
-    PAGE_UNAVAILABLE = 'Страница демо недоступна. Попробуй позже.'
-    mirrors = active_mirrors()
-    if not mirrors:
-        return jsonify({'status': 'error', 'message': 'Сервис временно недоступен. Попробуйте позже.'})
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {'status': 'pending', 'result': None}
+    threading.Thread(target=_run_demo, args=(task_id, email), daemon=True).start()
+    return jsonify({'status': 'pending', 'task_id': task_id})
 
-    for m in random.sample(mirrors, len(mirrors)):
-        url = m['url']
-        try:
-            r = requests.post(f'{url}/demo', json={'email': email}, timeout=60)
-            result = r.json()
-            if result.get('message') == PAGE_UNAVAILABLE:
-                continue
-            return jsonify(result)
-        except requests.RequestException:
-            colab_urls[:] = [x for x in colab_urls if x['url'] != url]
-            continue
 
-    return jsonify({'status': 'error', 'message': PAGE_UNAVAILABLE})
+@app.route('/poll/<task_id>')
+def poll(task_id):
+    task = tasks.get(task_id)
+    if not task:
+        return jsonify({'status': 'error', 'message': 'Задача не найдена'})
+    if task['status'] == 'pending':
+        return jsonify({'status': 'pending'})
+    tasks.pop(task_id, None)
+    return jsonify(task['result'])
 
 
 def _pick_mirror():
